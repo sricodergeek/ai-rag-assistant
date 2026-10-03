@@ -1,0 +1,46 @@
+ACME CORP CUSTOMER KNOWLEDGE PROFILE
+Synthetic evaluation document — all service details below are fictional and are provided only for retrieval testing.
+
+1. CUSTOMER OVERVIEW
+Customer: Acme Corp
+Customer ID: ACME-1042
+
+Acme Corp is represented in this sample as a fictional organization using a hosted workspace for internal project coordination. The workspace includes document collections, team notes, and a small set of configurable review queues. This profile is an evaluation fixture and does not describe an actual customer or a real service agreement.
+
+The account workspace is organized into several operational areas. The Launch Desk contains onboarding checklists and release calendars. The Archive Room contains prior project summaries and approved reference notes. The Metrics Board displays fictional service activity totals for demonstration purposes. These labels are invented examples and do not refer to real products or locations.
+
+2. SUBSCRIPTION AND CONTRACT
+Subscription plan: Enterprise
+Monthly subscription cost: $2,499
+Contract renewal date: June 30, 2027
+
+The fictional Enterprise subscription includes a configurable workspace, shared document libraries, scheduled exports, and access to a service support queue. The monthly subscription cost is recorded as a single recurring account charge in this example. Optional training sessions and one-time setup work are not included in that monthly amount.
+
+The contract is described as an annual agreement for this synthetic profile. A renewal review is scheduled before the listed renewal date so the account team can confirm the workspace configuration, review service usage, and prepare an updated summary. This sample does not define any automatic renewal terms, payment instructions, or legal conditions.
+
+3. SUPPORT AND SERVICE OPERATIONS
+Support response SLA: 2 hours
+
+For this fictional account, the support response service level target is two hours. The clock begins when a support request is accepted into the service queue during the stated coverage window. The target describes the expected first response, not a guaranteed resolution time. Requests that need additional investigation may receive a status update and a revised estimate after the initial response.
+
+Routine workspace questions can be categorized as access, document organization, scheduled export, or configuration requests. The category helps route a request to the appropriate fictional support group. A requester should include the workspace area and a short description of the issue, while avoiding credentials or other sensitive information in the description.
+
+Service reviews use a sample monthly summary with counts for opened requests, first responses, and completed follow-ups. These example measures are intended to illustrate how a knowledge-base entry might describe service operations. They are not measurements of a real company's performance.
+
+4. REGIONAL CONFIGURATION AND DATA LIFECYCLE
+Primary region: North America
+Data retention period: 90 days
+
+The sample workspace is configured for the North America region. In this fictional profile, the region is a service configuration label used to group workspace settings and operational documentation. It should not be interpreted as a statement about the location of any real person's data or a real company's infrastructure.
+
+The data retention period is 90 days for the example workspace records covered by this entry. At the end of the retention period, eligible temporary records are scheduled for removal according to the fictional workspace lifecycle. Saved reference documents may follow a separate archive rule in this invented scenario. The distinction is included to make the example more realistic; it does not establish a real policy.
+
+5. WORKSPACE GUIDANCE
+The workspace owner can organize reference material by project, quarter, or operating group. Suggested fictional folders include Getting Started, Service Notes, Export Calendar, and Renewal Review. Folder names should be descriptive and consistent so that a reader can identify the intended material without opening every file.
+
+When preparing a review, the account team can summarize the subscription plan, renewal date, support target, regional configuration, and retention setting in one overview. Questions about a specific setting should be answered from the current approved reference entry. If a detail is absent from that entry, the reader should mark it as unavailable and request clarification rather than infer an answer from unrelated notes.
+
+6. CHANGE NOTES
+This synthetic profile was prepared as a stable retrieval example. The customer label and account identifier are fictional test values. The subscription, support, regional, and lifecycle details are invented. No real-person identity, personal record, medical detail, or real service history is included.
+
+For evaluation, questions may refer to the customer identifier, subscription amount, renewal date, response target, region, or retention duration. The expected answers are stated directly in the section headings and accompanying paragraphs so that page-independent text retrieval can be checked against predictable facts.
