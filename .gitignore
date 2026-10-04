@@ -3,3 +3,7 @@
 !.env.example
 
 backend/chroma_db/
+
+# Python local environment and cache
+backend/.venv/
+backend/**/__pycache__/
