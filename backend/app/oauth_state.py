@@ -3,8 +3,10 @@ import secrets
 
 import redis
 
+from backend.app.config import REDIS_URL
 
-_redis = redis.Redis.from_url("redis://localhost:6379", decode_responses=True)
+
+_redis = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 _STATE_TTL_SECONDS = 10 * 60
 _STATE_KEY_PREFIX = "oauth_state:"
 _TRANSACTION_TTL_SECONDS = 10 * 60

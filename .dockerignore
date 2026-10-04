@@ -1,0 +1,36 @@
+# Allow only dependency declarations and backend runtime Python source.
+**
+!backend/
+!backend/requirements.txt
+!backend/__init__.py
+!backend/app/
+!backend/app/*.py
+
+# Exclude legacy diagnostic scripts as well as local data and artifacts.
+backend/app/test_*.py
+.env
+.env.*
+.git
+.gitignore
+backend/.venv
+backend/chroma_db
+backend/documents
+backend/tests
+backend/**/__pycache__
+backend/**/*.pyc
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+**/.pytest_cache
+.mypy_cache
+.ruff_cache
+**/node_modules
+frontend
+frontend/dist
+frontend/dist-ssr
+.vscode
+.idea
+**/.DS_Store
+**/*.swp
+**/*.swo
+**/*~

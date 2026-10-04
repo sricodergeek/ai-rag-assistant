@@ -2,8 +2,10 @@ import secrets
 
 import redis
 
+from backend.app.config import REDIS_URL
 
-_redis = redis.Redis.from_url("redis://localhost:6379", decode_responses=True)
+
+_redis = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 _SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 _SESSION_KEY_PREFIX = "session:"
 
