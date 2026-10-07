@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -59,6 +60,58 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   sources?: AnswerSource[]
+}
+
+interface FeatureUsage {
+  limit: number
+  used: number
+  remaining: number
+  resets_at: string
+}
+
+interface VoiceUsage {
+  stt: FeatureUsage
+  tts: FeatureUsage
+}
+
+interface SpeechSession {
+  messageId: string
+  controller: AbortController
+  audio?: HTMLAudioElement
+  url?: string
+}
+
+function releaseSpeech(session: SpeechSession | null) {
+  if (!session) return
+  session.controller.abort()
+  if (session.audio) {
+    session.audio.onended = null
+    session.audio.onerror = null
+    session.audio.pause()
+    session.audio.removeAttribute('src')
+    session.audio.load()
+  }
+  if (session.url) URL.revokeObjectURL(session.url)
+}
+
+function validFeatureUsage(value: unknown): value is FeatureUsage {
+  if (!value || typeof value !== 'object') return false
+  const usage = value as FeatureUsage
+  return [usage.limit, usage.used, usage.remaining].every((count) => Number.isInteger(count) && count >= 0)
+    && usage.remaining === Math.max(0, usage.limit - usage.used)
+    && typeof usage.resets_at === 'string' && Number.isFinite(Date.parse(usage.resets_at))
+}
+
+function voiceRequestError(status: number, detail: unknown, feature: 'stt' | 'tts'): string {
+  if (status === 429 && detail && typeof detail === 'object'
+    && 'code' in detail && detail.code === 'voice_quota_exhausted') {
+    return feature === 'stt' ? 'Daily voice-input limit reached. You can still type.'
+      : 'Daily voice-answer limit reached.'
+  }
+  if (status === 503) return 'Voice services are unavailable. You can still use text chat.'
+  if (status < 500 && typeof detail === 'string') return detail
+  return feature === 'stt' ? 'Transcription is unavailable. Please try again.'
+    : 'Voice answers are unavailable. Please try again.'
 }
 
 interface AuthUser {
@@ -140,11 +193,143 @@ function App() {
   const [question, setQuestion] = useState('')
   const [voicePhase, setVoicePhase] = useState<VoicePhase>('idle')
   const [voiceError, setVoiceError] = useState('')
+  const [voiceUsage, setVoiceUsage] = useState<VoiceUsage | null>(null)
+  const [usageError, setUsageError] = useState('')
+  const [speechError, setSpeechError] = useState('')
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null)
+  const [generatingSpeechId, setGeneratingSpeechId] = useState<string | null>(null)
+  const [blockedSpeechId, setBlockedSpeechId] = useState<string | null>(null)
+  const speechSessionRef = useRef<SpeechSession | null>(null)
+  const usageControllerRef = useRef<AbortController | null>(null)
+  const voiceUserRef = useRef<string | null>(null)
+
+  const refreshVoiceUsage = useCallback(async () => {
+    if (user?.id && voiceUserRef.current !== user.id) return
+    usageControllerRef.current?.abort()
+    if (!user?.id) return
+    const controller = new AbortController()
+    usageControllerRef.current = controller
+    try {
+      const response = await fetch(apiUrl('/voice/usage'), {
+        credentials: 'include', signal: controller.signal, cache: 'no-store',
+      })
+      const result = await response.json()
+      if (!response.ok || !validFeatureUsage(result.stt) || !validFeatureUsage(result.tts)) {
+        throw new Error('Invalid voice usage response.')
+      }
+      if (usageControllerRef.current !== controller || controller.signal.aborted) return
+      setVoiceUsage(result as VoiceUsage)
+      setUsageError('')
+    } catch {
+      if (usageControllerRef.current !== controller || controller.signal.aborted) return
+      setVoiceUsage(null)
+      setUsageError('Voice usage is unavailable. You can still use text chat.')
+    }
+  }, [user])
+
+  useEffect(() => {
+    const initialLoad = setTimeout(() => { void refreshVoiceUsage() }, 0)
+    return () => {
+      clearTimeout(initialLoad)
+      usageControllerRef.current?.abort()
+      usageControllerRef.current = null
+    }
+  }, [refreshVoiceUsage])
+
+  useEffect(() => {
+    if (!user?.id) return
+    const refresh = () => { void refreshVoiceUsage() }
+    window.addEventListener('focus', refresh)
+    const reset = voiceUsage ? Math.min(Date.parse(voiceUsage.stt.resets_at), Date.parse(voiceUsage.tts.resets_at)) : null
+    const timer = reset ? setTimeout(refresh, Math.max(1000, reset - Date.now() + 250)) : undefined
+    return () => {
+      window.removeEventListener('focus', refresh)
+      clearTimeout(timer)
+    }
+  }, [user?.id, voiceUsage, refreshVoiceUsage])
+
+  function stopSpeech() {
+    const session = speechSessionRef.current
+    speechSessionRef.current = null
+    releaseSpeech(session)
+    setPlayingMessageId(null)
+    setGeneratingSpeechId(null)
+    setBlockedSpeechId(null)
+    setSpeechError('')
+  }
+
+  async function playSpeech(session: SpeechSession) {
+    try {
+      await session.audio?.play()
+      if (speechSessionRef.current !== session) return
+      setPlayingMessageId(session.messageId)
+      setBlockedSpeechId(null)
+      setSpeechError('')
+    } catch {
+      if (speechSessionRef.current !== session) return
+      setPlayingMessageId(null)
+      setBlockedSpeechId(session.messageId)
+      setSpeechError('Playback was blocked. Click Play again to listen without another voice request.')
+    }
+  }
+
+  async function handleSpeak(message: ChatMessage) {
+    const current = speechSessionRef.current
+    if (current?.messageId === message.id) {
+      if (!current.audio) return
+      if (playingMessageId === message.id) stopSpeech()
+      else await playSpeech(current)
+      return
+    }
+    if (!voiceUsage || voiceUsage.tts.remaining === 0 || !activeDocumentId || isLoggingOut) return
+    stopSpeech()
+    const session: SpeechSession = { messageId: message.id, controller: new AbortController() }
+    speechSessionRef.current = session
+    setGeneratingSpeechId(message.id)
+    try {
+      const response = await fetch(apiUrl('/speak'), {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: message.content, document_id: activeDocumentId }),
+        signal: session.controller.signal,
+      })
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}))
+        throw new Error(voiceRequestError(response.status, result.detail, 'tts'))
+      }
+      const blob = await response.blob()
+      if (speechSessionRef.current !== session) return
+      if (!blob.size) throw new Error('The voice response was empty. Please try again.')
+      session.url = URL.createObjectURL(blob)
+      session.audio = new Audio(session.url)
+      session.audio.onended = () => { if (speechSessionRef.current === session) stopSpeech() }
+      session.audio.onerror = () => {
+        if (speechSessionRef.current !== session) return
+        stopSpeech()
+        setSpeechError('This audio could not be played in your browser.')
+      }
+      setGeneratingSpeechId(null)
+      await playSpeech(session)
+    } catch (error) {
+      if (speechSessionRef.current !== session) return
+      stopSpeech()
+      setSpeechError(error instanceof TypeError ? 'Could not connect to voice answers. Please try again.'
+        : error instanceof Error ? error.message : 'Voice answers are unavailable. Please try again.')
+    } finally {
+      // A cancelled browser request may already have consumed a server allowance.
+      void refreshVoiceUsage()
+    }
+  }
   const voiceSessionRef = useRef<VoiceSession | null>(null)
 
   useEffect(() => () => {
     releaseVoice(voiceSessionRef.current)
     voiceSessionRef.current = null
+    voiceUserRef.current = null
+    releaseSpeech(speechSessionRef.current)
+    speechSessionRef.current = null
+    usageControllerRef.current?.abort()
+    usageControllerRef.current = null
   }, [])
 
   function cancelVoice() {
@@ -166,7 +351,7 @@ function App() {
       }
       return
     }
-    if (!activeDocumentId || isAsking || isLoggingOut) return
+    if (!activeDocumentId || isAsking || isLoggingOut || !voiceUsage || voiceUsage.stt.remaining === 0) return
     setVoiceError('')
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       setVoicePhase('error')
@@ -233,8 +418,7 @@ function App() {
           const result = await response.json().catch(() => ({}))
           if (voiceSessionRef.current !== session) return
           if (!response.ok) {
-            throw new Error(response.status < 500 && typeof result.detail === 'string'
-              ? result.detail : 'Transcription failed. Please try again.')
+            throw new Error(voiceRequestError(response.status, result.detail, 'stt'))
           }
           if (typeof result.text !== 'string' || !result.text.trim()) {
             throw new Error('No speech was detected. Please try again.')
@@ -249,6 +433,8 @@ function App() {
           fail(error instanceof TypeError
             ? 'Could not connect to transcription. Please try again.'
             : error instanceof Error ? error.message : 'Transcription failed. Please try again.')
+        } finally {
+          void refreshVoiceUsage()
         }
       }
       recorder.start(250)
@@ -322,6 +508,7 @@ function App() {
 
         const result = (await response.json()) as AuthUser
         if (isActive && typeof result.id === 'string' && typeof result.email === 'string') {
+          voiceUserRef.current = result.id
           setUser({
             id: result.id,
             email: result.email,
@@ -376,6 +563,7 @@ function App() {
   }, [])
 
   async function handleLogout() {
+    stopSpeech()
     if (isLoggingOut) return
     cancelVoice()
     setIsLoggingOut(true)
@@ -390,6 +578,11 @@ function App() {
       if (!response.ok) {
         throw new Error('Logout failed.')
       }
+      usageControllerRef.current?.abort()
+      usageControllerRef.current = null
+      voiceUserRef.current = null
+      setVoiceUsage(null)
+      setUsageError('')
       setUser(null)
       setDocuments([])
       setActiveDocumentId(null)
@@ -501,6 +694,7 @@ function App() {
   }
 
   function startConversationForDocument(documentId: string) {
+    stopSpeech()
     cancelVoice()
     historyRequestRef.current += 1
     askControllerRef.current?.abort()
@@ -559,6 +753,7 @@ function App() {
   }
 
   function startNewConversation() {
+    stopSpeech()
     cancelVoice()
     historyRequestRef.current += 1
     askControllerRef.current?.abort()
@@ -573,6 +768,7 @@ function App() {
   }
 
   async function selectConversation(documentId: string, selectedConversationId: string) {
+    stopSpeech()
     cancelVoice()
     const requestId = ++historyRequestRef.current
     askControllerRef.current?.abort()
@@ -700,6 +896,7 @@ function App() {
 
       setDocuments((current) => current.filter((document) => document.id !== documentId))
       if (activeDocumentId === documentId) {
+        stopSpeech()
         cancelVoice()
         conversationListRequestRef.current += 1
         historyRequestRef.current += 1
@@ -963,12 +1160,14 @@ function App() {
           </div>
           <details className="release-notes">
             <summary>v{releaseVersion} · What's New</summary>
-            <p>v{releaseVersion} — Multilingual Voice Input</p>
+            <p>v{releaseVersion} — Voice Answers & Daily Limits</p>
             <ul>
               <li>🎤 Voice-to-text input using the microphone</li>
               <li>🌎 Multilingual speech transcription</li>
               <li>✏️ Review and edit the transcript before sending</li>
               <li>💬 Same-language answers for supported non-English questions</li>
+              <li>🔊 On-demand AI-generated voice answers</li>
+              <li>📅 Separate daily voice-input and voice-answer limits</li>
               <li>🔒 OpenAI API credentials remain securely on the backend</li>
             </ul>
           </details>
@@ -1024,6 +1223,19 @@ function App() {
                       <div className="message-bubble">
                         <p>{message.content}</p>
                       </div>
+                      {message.role === 'assistant' && (
+                        <div className="speech-controls">
+                          <button type="button" className="speaker-button"
+                            aria-label={playingMessageId === message.id ? 'Stop voice answer' : 'Play voice answer'}
+                            disabled={generatingSpeechId === message.id || isLoggingOut
+                              || (playingMessageId !== message.id && blockedSpeechId !== message.id
+                                && (!voiceUsage || voiceUsage.tts.remaining === 0))}
+                            onClick={() => void handleSpeak(message)}>
+                            {generatingSpeechId === message.id ? 'Generating…' : playingMessageId === message.id ? '■ Stop' : '🔊 Play'}
+                          </button>
+                          <span>AI-generated voice · Telugu voice quality requires validation</span>
+                        </div>
+                      )}
                       {message.sources && message.sources.length > 0 && (
                         <div className="answer-sources">
                           <span className="sources-label">Sources</span>
@@ -1062,6 +1274,10 @@ function App() {
           <div className="composer-wrap">
             {askError && <p className="ask-error" role="alert">{askError}</p>}
             {voiceError && <p className="voice-error" role="alert">{voiceError}</p>}
+            {speechError && <p className="voice-error" role="alert">{speechError}</p>}
+            {usageError && <p className="voice-error" role="status">{usageError} <button type="button" className="voice-retry" onClick={() => void refreshVoiceUsage()}>Retry</button></p>}
+            {voiceUsage?.stt.remaining === 0 && <p className="voice-limit" role="status">Daily voice-input limit reached. You can still type. Resets {new Date(voiceUsage.stt.resets_at).toLocaleString()}.</p>}
+            {voiceUsage?.tts.remaining === 0 && <p className="voice-limit" role="status">Daily voice-answer limit reached. Resets {new Date(voiceUsage.tts.resets_at).toLocaleString()}.</p>}
             {['requesting', 'recording', 'uploading'].includes(voicePhase) && (
               <div className="voice-status" role="status">
                 <span>{voicePhase === 'requesting' ? 'Waiting for microphone permission…'
@@ -1080,7 +1296,7 @@ function App() {
                 onChange={(event) => setQuestion(event.target.value)}
                 onKeyDown={handleQuestionKeyDown}
               />
-              <button
+              {(voiceUsage && voiceUsage.stt.remaining > 0 || voicePhase === 'recording') && <button
                 className={`microphone-button${voicePhase === 'recording' ? ' is-recording' : ''}`}
                 type="button"
                 aria-label={voicePhase === 'recording' ? 'Stop recording' : 'Record a question'}
@@ -1089,7 +1305,7 @@ function App() {
                 onClick={() => void handleMicrophone()}
               >
                 <MicrophoneIcon />
-              </button>
+              </button>}
               <button
                 className="send-button"
                 type="submit"

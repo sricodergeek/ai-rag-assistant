@@ -14,6 +14,11 @@ from backend.app.database import get_db
 WEBM = b"\x1a\x45\xdf\xa3" + b"synthetic audio"
 
 
+@pytest.fixture(autouse=True)
+def quota_stub(monkeypatch):
+    monkeypatch.setattr(main, "reserve_voice", Mock())
+
+
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setitem(main.app.dependency_overrides, get_db, lambda: Mock())

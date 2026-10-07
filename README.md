@@ -2,7 +2,7 @@
 
 AI Knowledge Assistant is a full-stack PDF question-answering application built with React and FastAPI. Users sign in with Google, upload documents, ask questions with filename/page citations, and revisit conversations stored in PostgreSQL. The backend enforces document ownership before retrieving document-scoped evidence from ChromaDB and generating answers through OpenAI. Deterministic conversational routing, bounded LLM history, and isolated offline evaluation provide safeguards around the RAG workflow.
 
-**Release: v0.2.0 — Multilingual Voice Input.** This project demonstrates authenticated RAG application engineering, persistence, access control, and evaluation infrastructure. It is not presented as a production-ready deployment.
+**Release: v0.3.0 — Voice Answers & Daily Limits.** This project demonstrates authenticated RAG application engineering, persistence, access control, and evaluation infrastructure. It is not presented as a production-ready deployment.
 
 ## Demo
 
@@ -42,6 +42,53 @@ localized replies. Retrieved documents and retrieval logic are unchanged.
 The OpenAI API key remains server-side. Uploaded audio is closed and discarded after
 the transcription request, with no permanent application audio storage. Microphone
 access requires browser permission and a supported browser on HTTPS or localhost.
+
+### Voice answers and daily allowances (v0.3.0)
+
+Click **Play** below a completed assistant answer to request speech; answers never
+play automatically. **Stop** stops playback, and selecting another answer replaces
+it. The text is sent unchanged to the backend `/speak` endpoint. Audio is kept only
+in memory for playback, with no permanent files. Speaker controls disclose
+**AI-generated voice**. If browser playback is blocked, click Play again to retry
+that generated audio without another provider request.
+
+Each authenticated user has separate daily allowances: **10 speech-to-text (STT)
+requests** and **5 text-to-speech (TTS) requests** by default. Redis atomically
+reserves each valid request before provider processing; provider failures still
+consume allowance, while invalid or rejected inputs do not. SDK retries belong to
+that same logical request. Allowances reset at **00:00 UTC**; the UI displays the
+reset in the user's local timezone. The exhausted microphone is hidden and voice
+answer generation is disabled. Voice limits never disable typed questions or `/ask`.
+
+Usage status comes from `/voice/usage`. Voice controls fail closed if usage cannot
+be loaded, while typed chat remains available. Redis failures block unmetered voice
+requests. Counters require shared Redis with appropriate persistence/eviction
+settings: lost or evicted counters can reset allowances. Existing session
+authentication also depends on Redis.
+
+Backend configuration (safe defaults; see `.env.example`):
+
+| Variable | Default |
+| --- | --- |
+| `VOICE_STT_DAILY_LIMIT` | `10` |
+| `VOICE_TTS_DAILY_LIMIT` | `5` |
+| `TTS_MODEL` | `gpt-4o-mini-tts` |
+| `TTS_VOICE` | `marin` |
+| `TTS_FORMAT` | `mp3` |
+
+Limits must be non-negative integers; `0` disables new requests for that feature.
+TTS uses the existing server-side `OPENAI_API_KEY` and `REDIS_URL`. Supported output
+formats are MP3, Opus, AAC, FLAC, WAV, and PCM; MP3 is the initial browser format.
+Raw PCM requires custom playback support and is not recommended for this UI.
+Answers over 4,096 characters are rejected for speech without truncation or quota
+consumption; their full text remains available.
+
+English and Hindi speech require live quality testing. Telugu is not explicitly
+listed in OpenAI's current published TTS language list, and voices are optimized for
+English. Telugu input is allowed for evaluation, but native pronunciation/accent
+quality is **not guaranteed** and requires native-speaker validation. No special
+pronunciation rewriting or translation is applied. Automated tests mock OpenAI;
+this release's live speech quality remains subject to validation.
 
 ### Engineering capabilities
 
@@ -226,4 +273,4 @@ It clears live opt-in and inherited pytest options, disables plugin autoloading,
 - Small heuristic component benchmarks; no representative end-to-end `/ask` accuracy measurement.
 - Incomplete fresh-clone setup, unpinned backend dependencies, and unfinished production security/deployment hardening.
 
-The current release is v0.2.0, adding multilingual voice input. Demo assets and presentation documentation can describe the existing behavior without implying additional application capabilities.
+The current release is v0.3.0, adding on-demand voice answers and daily voice allowances. Demo assets and presentation documentation can describe the existing behavior without implying additional application capabilities.

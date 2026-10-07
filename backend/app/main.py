@@ -28,6 +28,8 @@ from backend.app.origin_validation import validate_frontend_origin
 from backend.app.vector_store import delete_document_vectors, search_documents
 from backend.app.transcription import MAX_AUDIO_BYTES, audio_format, transcribe_audio
 from backend.app.question_language import no_results_response, question_language
+from backend.app.speech import generate_speech, validate_speech_text
+from backend.app.voice_usage import QuotaExhausted, UsageUnavailable, get_voice_usage, reserve_voice
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,23 @@ class AskRequest(BaseModel):
     question: str
     conversation_id: str
     document_id: str
+
+
+class SpeakRequest(BaseModel):
+    text: str
+    document_id: str | None = None
+
+
+def _reserve_voice(user_id, feature):
+    try:
+        reserve_voice(user_id, feature)
+    except QuotaExhausted as error:
+        raise HTTPException(status_code=429, detail={
+            "code": "voice_quota_exhausted", "feature": error.feature,
+            **error.usage.to_dict(),
+        }) from None
+    except UsageUnavailable:
+        raise HTTPException(status_code=503, detail="Voice usage is unavailable. Please try again.") from None
 
 
 def _conversation_title(first_user_message: str | None) -> str:
@@ -51,7 +70,7 @@ def _conversation_title(first_user_message: str | None) -> str:
 app = FastAPI(
     title="AI Knowledge Assistant",
     description="RAG-based document question answering API",
-    version="0.2.0",
+    version="0.3.0",
 )
 app.include_router(auth_router)
 
@@ -328,6 +347,7 @@ def transcribe(
         extension = audio_format(file.filename or "", data)
         if extension is None:
             raise HTTPException(status_code=415, detail="Unsupported or invalid audio file.")
+        _reserve_voice(current_user.id, "stt")
         try:
             return transcribe_audio(data, extension)
         except ValueError:
@@ -338,6 +358,43 @@ def transcribe(
             raise HTTPException(status_code=502, detail="Transcription is unavailable. Please try again.") from None
     finally:
         file.file.close()
+
+
+@app.get("/voice/usage")
+def voice_usage(current_user: User = Depends(get_current_user)):
+    try:
+        return get_voice_usage(current_user.id)
+    except UsageUnavailable:
+        raise HTTPException(status_code=503, detail="Voice usage is unavailable. Please try again.") from None
+
+
+@app.post("/speak")
+def speak(
+    request: SpeakRequest,
+    _fetch_metadata_validated: None = Depends(validate_fetch_metadata),
+    _origin_validated: None = Depends(validate_frontend_origin),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        validate_speech_text(request.text)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+    if request.document_id is not None:
+        try:
+            document_id = uuid.UUID(request.document_id)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Document not found.") from None
+        document = db.get(Document, document_id)
+        if document is None or document.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Document not found.")
+    _reserve_voice(current_user.id, "tts")
+    try:
+        audio, content_type = generate_speech(request.text)
+    except Exception:
+        logger.warning("Speech generation failed.")
+        raise HTTPException(status_code=502, detail="Voice answers are unavailable. Please try again.") from None
+    return Response(content=audio, media_type=content_type, headers={"Cache-Control": "no-store"})
 
 
 @app.post("/ask")

@@ -18,6 +18,25 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 API_URL = os.getenv("API_URL", "http://localhost:8000").rstrip("/")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
+
+def _voice_limit(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        raise RuntimeError(f"{name} must be a non-negative integer.") from None
+    if value < 0:
+        raise RuntimeError(f"{name} must be a non-negative integer.")
+    return value
+
+
+VOICE_STT_DAILY_LIMIT = _voice_limit("VOICE_STT_DAILY_LIMIT", 10)
+VOICE_TTS_DAILY_LIMIT = _voice_limit("VOICE_TTS_DAILY_LIMIT", 5)
+TTS_MODEL = os.getenv("TTS_MODEL", "gpt-4o-mini-tts").strip() or "gpt-4o-mini-tts"
+TTS_VOICE = os.getenv("TTS_VOICE", "marin").strip() or "marin"
+TTS_FORMAT = os.getenv("TTS_FORMAT", "mp3").strip().lower() or "mp3"
+if TTS_FORMAT not in {"mp3", "opus", "aac", "flac", "wav", "pcm"}:
+    raise RuntimeError("TTS_FORMAT must be a supported audio format.")
+
 _SECURE_COOKIE_TRUE_VALUES = {"1", "true", "yes", "on"}
 _SECURE_COOKIE_FALSE_VALUES = {"0", "false", "no", "off"}
 _PRODUCTION_ENVIRONMENTS = {"prod", "production"}

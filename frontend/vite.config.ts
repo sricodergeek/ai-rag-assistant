@@ -26,6 +26,14 @@ export default defineConfig(({ mode }) => {
           target: apiUrl,
           changeOrigin: true,
         },
+        '/speak': {
+          target: apiUrl,
+          changeOrigin: true,
+        },
+        '/voice': {
+          target: apiUrl,
+          changeOrigin: true,
+        },
         '/transcribe': {
           target: apiUrl,
           changeOrigin: true,
