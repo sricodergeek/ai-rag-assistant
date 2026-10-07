@@ -2,7 +2,7 @@
 
 AI Knowledge Assistant is a full-stack PDF question-answering application built with React and FastAPI. Users sign in with Google, upload documents, ask questions with filename/page citations, and revisit conversations stored in PostgreSQL. The backend enforces document ownership before retrieving document-scoped evidence from ChromaDB and generating answers through OpenAI. Deterministic conversational routing, bounded LLM history, and isolated offline evaluation provide safeguards around the RAG workflow.
 
-**Status: v0.1.0 — application implementation frozen for portfolio presentation.** This project demonstrates authenticated RAG application engineering, persistence, access control, and evaluation infrastructure. It is not presented as a production-ready deployment.
+**Release: v0.2.0 — Multilingual Voice Input.** This project demonstrates authenticated RAG application engineering, persistence, access control, and evaluation infrastructure. It is not presented as a production-ready deployment.
 
 ## Demo
 
@@ -19,6 +19,29 @@ Demo assets are not included yet. A future screenshot sequence or short recordin
 - Loading, error, and empty states in a custom React interface.
 
 Reopening a conversation reads stored messages without an LLM call. Inline citations remain in saved answer text; the separate structured source list is not persisted.
+
+### Voice input
+
+Click the microphone in the question composer to record, then click it again to stop.
+The authenticated backend `/transcribe` endpoint sends audio to OpenAI's transcription
+API with automatic language detection, preserving the spoken language rather than
+requesting an English translation. The transcript is appended to your existing draft;
+review, edit, or delete it before using the unchanged Send/Enter flow. Cancel discards
+recording or pending transcription. Recordings are limited to 60 seconds and 10 MB,
+and microphone tracks are released after stopping or cancellation.
+
+Multilingual transcription and same-language generated answers are supported by the
+integration, but accuracy and language availability require live testing; English,
+Hindi, and Telugu have not been guaranteed by offline tests. No-results replies use
+fixed English, Hindi, or Telugu messages selected from the current question text.
+This lightweight script heuristic is imperfect: Devanagari is shared across languages,
+romanized or mixed-language questions can be misidentified, and other scripts default
+to English. A small set of exact Hindi/Telugu conversational phrases also receives
+localized replies. Retrieved documents and retrieval logic are unchanged.
+
+The OpenAI API key remains server-side. Uploaded audio is closed and discarded after
+the transcription request, with no permanent application audio storage. Microphone
+access requires browser permission and a supported browser on HTTPS or localhost.
 
 ### Engineering capabilities
 
@@ -203,4 +226,4 @@ It clears live opt-in and inherited pytest options, disables plugin autoloading,
 - Small heuristic component benchmarks; no representative end-to-end `/ask` accuracy measurement.
 - Incomplete fresh-clone setup, unpinned backend dependencies, and unfinished production security/deployment hardening.
 
-The v0.1.0 implementation is frozen. Demo assets and presentation documentation can describe the existing behavior without implying additional application capabilities.
+The current release is v0.2.0, adding multilingual voice input. Demo assets and presentation documentation can describe the existing behavior without implying additional application capabilities.

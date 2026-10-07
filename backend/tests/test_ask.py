@@ -596,6 +596,16 @@ def test_ask_hides_document_owned_by_another_user_before_conversation_or_rag(
         ("nice", "Glad to help!"),
         ("cool", "Glad to help!"),
         ("bye", "Goodbye!"),
+        ("नमस्ते", "नमस्ते! इस दस्तावेज़ के बारे में मैं आपकी कैसे मदद कर सकता हूँ?"),
+        ("धन्यवाद", "आपका स्वागत है!"),
+        ("शुक्रिया", "आपका स्वागत है!"),
+        ("ठीक है", "मदद करके खुशी हुई!"),
+        ("अलविदा", "अलविदा!"),
+        ("నమస్తే", "నమస్తే! ఈ పత్రం గురించి మీకు ఎలా సహాయపడగలను?"),
+        ("నమస్కారం", "నమస్తే! ఈ పత్రం గురించి మీకు ఎలా సహాయపడగలను?"),
+        ("ధన్యవాదాలు", "మీకు స్వాగతం!"),
+        ("సరే", "సహాయం చేయడం సంతోషంగా ఉంది!"),
+        ("వీడ్కోలు", "వీడ్కోలు!"),
     ],
 )
 def test_exact_conversational_inputs_skip_rag_and_persist_messages(
@@ -687,6 +697,8 @@ def test_conversational_intent_normalizes_case_and_whitespace(monkeypatch):
     [
         "thanks, what is the renewal date?",
         "hello what is the SLA?",
+        "नमस्ते, नवीनीकरण की तारीख क्या है?",
+        "ధన్యవాదాలు, గడువు ఎప్పుడు?",
         "What is the renewal date?",
     ],
 )
@@ -858,7 +870,12 @@ def test_rag_history_configuration_rejects_invalid_values(setting):
 
 
 @pytest.mark.parametrize("threshold", [None, 0.5])
-def test_empty_retrieval_skips_generation_and_persists_unavailable(monkeypatch, threshold):
+@pytest.mark.parametrize("question,unavailable", [
+    ("What is the customer ID?", "The information is not available in the provided document."),
+    ("ग्राहक की पहचान क्या है?", "यह जानकारी दिए गए दस्तावेज़ में उपलब्ध नहीं है।"),
+    ("కస్టమర్ గుర్తింపు ఏమిటి?", "ఈ సమాచారం అందించిన పత్రంలో అందుబాటులో లేదు."),
+])
+def test_empty_retrieval_skips_generation_and_persists_unavailable(monkeypatch, threshold, question, unavailable):
     document_id = uuid.UUID("abcdef01-2345-4678-9abc-def012345678")
     conversation_id = uuid.uuid4()
     previous_updated_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
@@ -873,8 +890,6 @@ def test_empty_retrieval_skips_generation_and_persists_unavailable(monkeypatch, 
     monkeypatch.setattr(main, "search_documents", retrieval)
     monkeypatch.setattr(main, "generate_answer", generation)
     _use_session(monkeypatch, session)
-    question = "What is the customer ID?"
-    unavailable = "The information is not available in the provided document."
 
     with TestClient(main.app) as client:
         response = client.post("/ask", json={

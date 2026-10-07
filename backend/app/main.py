@@ -26,6 +26,8 @@ from backend.app.llm import generate_answer
 from backend.app.models import Conversation, Document, Message, User
 from backend.app.origin_validation import validate_frontend_origin
 from backend.app.vector_store import delete_document_vectors, search_documents
+from backend.app.transcription import MAX_AUDIO_BYTES, audio_format, transcribe_audio
+from backend.app.question_language import no_results_response, question_language
 
 
 logger = logging.getLogger(__name__)
@@ -49,7 +51,7 @@ def _conversation_title(first_user_message: str | None) -> str:
 app = FastAPI(
     title="AI Knowledge Assistant",
     description="RAG-based document question answering API",
-    version="0.1.0",
+    version="0.2.0",
 )
 app.include_router(auth_router)
 
@@ -68,7 +70,7 @@ app.add_middleware(
 def root():
     return {
         "message": "AI Knowledge Assistant API is running",
-        "version": "0.1.0",
+        "version": app.version,
     }
 
 
@@ -310,6 +312,34 @@ def delete_document(
     return Response(status_code=204)
 
 
+@app.post("/transcribe")
+def transcribe(
+    file: UploadFile = File(...),
+    _fetch_metadata_validated: None = Depends(validate_fetch_metadata),
+    _origin_validated: None = Depends(validate_frontend_origin),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = file.file.read(MAX_AUDIO_BYTES + 1)
+        if not data:
+            raise HTTPException(status_code=400, detail="The recording is empty.")
+        if len(data) > MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=413, detail="Audio must be 10 MB or smaller.")
+        extension = audio_format(file.filename or "", data)
+        if extension is None:
+            raise HTTPException(status_code=415, detail="Unsupported or invalid audio file.")
+        try:
+            return transcribe_audio(data, extension)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="No speech was detected. Please try again.") from None
+        except Exception:
+            # Do not expose provider messages, credentials, or uploaded audio.
+            logger.warning("Audio transcription failed.")
+            raise HTTPException(status_code=502, detail="Transcription is unavailable. Please try again.") from None
+    finally:
+        file.file.close()
+
+
 @app.post("/ask")
 def ask(
     request: AskRequest,
@@ -388,7 +418,7 @@ def ask(
             max_distance=RAG_MAX_DISTANCE,
         )
         if documents == []:
-            answer = "The information is not available in the provided document."
+            answer = no_results_response(request.question)
         else:
             answer = generate_answer(
                 request.question,
@@ -396,7 +426,7 @@ def ask(
                 generation_history[-RAG_MAX_HISTORY_MESSAGES:],
             )
     else:
-        answer = conversational_response(intent)
+        answer = conversational_response(intent, question_language(request.question))
 
     assistant_message = Message(
         id=uuid.uuid4(),

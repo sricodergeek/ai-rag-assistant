@@ -26,6 +26,10 @@ export default defineConfig(({ mode }) => {
           target: apiUrl,
           changeOrigin: true,
         },
+        '/transcribe': {
+          target: apiUrl,
+          changeOrigin: true,
+        },
       },
     },
   }

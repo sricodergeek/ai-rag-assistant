@@ -1185,3 +1185,59 @@
     height: 38px;
   }
 }
+
+/* Voice dictation uses the existing question composer. */
+.microphone-button {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  color: #6655d8;
+  background: #f1eefb;
+  border: 0;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.microphone-button svg { width: 20px; height: 20px; }
+.microphone-button.is-recording { color: #a34141; background: #fceaea; }
+.microphone-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.microphone-button:focus-visible, .voice-status button:focus-visible {
+  outline: 2px solid #6655d8;
+  outline-offset: 3px;
+}
+.voice-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 9px;
+  color: #6655d8;
+  font-size: 11px;
+}
+.voice-status button {
+  padding: 3px 7px;
+  color: inherit;
+  background: #f1eefb;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.voice-error { margin: 0 0 9px; color: #a34141; font-size: 11px; }
+
+.release-notes {
+  padding: 8px 3px 0;
+  color: #827c74;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.release-notes summary { cursor: pointer; }
+.release-notes summary:focus-visible {
+  outline: 2px solid #6655d8;
+  outline-offset: 3px;
+}
+.release-notes p { margin: 8px 0 5px; font-weight: 600; }
+.release-notes ul { margin: 0; padding-left: 17px; }
+.release-notes li + li { margin-top: 4px; }
+@media (max-width: 760px) {
+  .release-notes { grid-column: 1 / -1; padding-top: 0; }
+}

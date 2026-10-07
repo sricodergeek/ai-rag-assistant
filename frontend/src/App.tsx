@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
 } from 'react'
 import './App.css'
+import { version as releaseVersion } from '../package.json'
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '')
 
@@ -100,12 +101,175 @@ function SendIcon() {
   )
 }
 
+type VoicePhase = 'idle' | 'requesting' | 'recording' | 'uploading' | 'error'
+
+interface VoiceSession {
+  stream?: MediaStream
+  recorder?: MediaRecorder
+  controller: AbortController
+  timer?: ReturnType<typeof setTimeout>
+}
+
+function releaseVoice(session: VoiceSession | null) {
+  if (!session) return
+  session.controller.abort()
+  clearTimeout(session.timer)
+  if (session.recorder) {
+    session.recorder.ondataavailable = null
+    session.recorder.onstop = null
+    session.recorder.onerror = null
+    if (session.recorder.state !== 'inactive') session.recorder.stop()
+  }
+  session.stream?.getTracks().forEach((track) => track.stop())
+}
+
+function MicrophoneIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="7" y="2" width="6" height="10" rx="3" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v3m-3 0h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function App() {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [isAuthLoading, setIsAuthLoading] = useState(true)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [logoutError, setLogoutError] = useState('')
   const [question, setQuestion] = useState('')
+  const [voicePhase, setVoicePhase] = useState<VoicePhase>('idle')
+  const [voiceError, setVoiceError] = useState('')
+  const voiceSessionRef = useRef<VoiceSession | null>(null)
+
+  useEffect(() => () => {
+    releaseVoice(voiceSessionRef.current)
+    voiceSessionRef.current = null
+  }, [])
+
+  function cancelVoice() {
+    const session = voiceSessionRef.current
+    voiceSessionRef.current = null
+    releaseVoice(session)
+    setVoicePhase('idle')
+    setVoiceError('')
+  }
+
+  async function handleMicrophone() {
+    const current = voiceSessionRef.current
+    if (current) {
+      if (current.recorder?.state === 'recording') {
+        setVoicePhase('uploading')
+        clearTimeout(current.timer)
+        current.recorder.stop()
+        current.stream?.getTracks().forEach((track) => track.stop())
+      }
+      return
+    }
+    if (!activeDocumentId || isAsking || isLoggingOut) return
+    setVoiceError('')
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setVoicePhase('error')
+      setVoiceError('Voice recording is unavailable in this browser. You can still type your question.')
+      return
+    }
+    const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
+      .find((type) => MediaRecorder.isTypeSupported(type))
+    if (!mimeType) {
+      setVoicePhase('error')
+      setVoiceError('This browser cannot record a supported audio format. You can still type your question.')
+      return
+    }
+    const session: VoiceSession = { controller: new AbortController() }
+    voiceSessionRef.current = session
+    setVoicePhase('requesting')
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (voiceSessionRef.current !== session) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
+      session.stream = stream
+      const recorder = new MediaRecorder(stream, { mimeType })
+      session.recorder = recorder
+      const chunks: Blob[] = []
+      let bytes = 0
+      const fail = (message: string) => {
+        if (voiceSessionRef.current !== session) return
+        voiceSessionRef.current = null
+        releaseVoice(session)
+        setVoiceError(message)
+        setVoicePhase('error')
+      }
+      recorder.ondataavailable = (event) => {
+        if (voiceSessionRef.current !== session) return
+        bytes += event.data.size
+        if (bytes > 10 * 1024 * 1024) {
+          fail('The recording is too large. Please record a shorter question.')
+          return
+        }
+        if (event.data.size) chunks.push(event.data)
+      }
+      recorder.onerror = () => fail('Recording failed. Please try again.')
+      recorder.onstop = async () => {
+        clearTimeout(session.timer)
+        stream.getTracks().forEach((track) => track.stop())
+        if (voiceSessionRef.current !== session) return
+        setVoicePhase('uploading')
+        const blob = new Blob(chunks, { type: mimeType })
+        if (!blob.size) {
+          fail('The recording is empty. Please try again.')
+          return
+        }
+        try {
+          const form = new FormData()
+          form.append('file', blob, mimeType.includes('mp4') ? 'recording.mp4' : 'recording.webm')
+          const response = await fetch(apiUrl('/transcribe'), {
+            method: 'POST',
+            credentials: 'include',
+            body: form,
+            signal: session.controller.signal,
+          })
+          const result = await response.json().catch(() => ({}))
+          if (voiceSessionRef.current !== session) return
+          if (!response.ok) {
+            throw new Error(response.status < 500 && typeof result.detail === 'string'
+              ? result.detail : 'Transcription failed. Please try again.')
+          }
+          if (typeof result.text !== 'string' || !result.text.trim()) {
+            throw new Error('No speech was detected. Please try again.')
+          }
+          const transcript = result.text.trim()
+          setQuestion((draft) => [draft.trim(), transcript].filter(Boolean).join(' '))
+          voiceSessionRef.current = null
+          releaseVoice(session)
+          setVoicePhase('idle')
+        } catch (error) {
+          if (voiceSessionRef.current !== session) return
+          fail(error instanceof TypeError
+            ? 'Could not connect to transcription. Please try again.'
+            : error instanceof Error ? error.message : 'Transcription failed. Please try again.')
+        }
+      }
+      recorder.start(250)
+      setVoicePhase('recording')
+      session.timer = setTimeout(() => {
+        if (voiceSessionRef.current === session && recorder.state === 'recording') {
+          setVoicePhase('uploading')
+          recorder.stop()
+          stream.getTracks().forEach((track) => track.stop())
+        }
+      }, 60_000)
+    } catch (error) {
+      if (voiceSessionRef.current !== session) return
+      voiceSessionRef.current = null
+      releaseVoice(session)
+      setVoicePhase('error')
+      setVoiceError(error instanceof DOMException && error.name === 'NotAllowedError'
+        ? 'Microphone permission was denied. Allow microphone access or type your question.'
+        : 'Could not start the microphone. Please try again or type your question.')
+    }
+  }
   const [documents, setDocuments] = useState<DocumentListItem[]>([])
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null)
   const [conversationId, setConversationId] = useState<string | null>(null)
@@ -213,6 +377,7 @@ function App() {
 
   async function handleLogout() {
     if (isLoggingOut) return
+    cancelVoice()
     setIsLoggingOut(true)
     setLogoutError('')
 
@@ -263,6 +428,7 @@ function App() {
       return
     }
 
+    cancelVoice()
     const submittedDocumentId = activeDocumentId
     const submittedConversationId = conversationId ?? crypto.randomUUID()
     setConversationId(submittedConversationId)
@@ -335,6 +501,7 @@ function App() {
   }
 
   function startConversationForDocument(documentId: string) {
+    cancelVoice()
     historyRequestRef.current += 1
     askControllerRef.current?.abort()
     askControllerRef.current = null
@@ -392,6 +559,7 @@ function App() {
   }
 
   function startNewConversation() {
+    cancelVoice()
     historyRequestRef.current += 1
     askControllerRef.current?.abort()
     askControllerRef.current = null
@@ -405,6 +573,7 @@ function App() {
   }
 
   async function selectConversation(documentId: string, selectedConversationId: string) {
+    cancelVoice()
     const requestId = ++historyRequestRef.current
     askControllerRef.current?.abort()
     askControllerRef.current = null
@@ -531,6 +700,7 @@ function App() {
 
       setDocuments((current) => current.filter((document) => document.id !== documentId))
       if (activeDocumentId === documentId) {
+        cancelVoice()
         conversationListRequestRef.current += 1
         historyRequestRef.current += 1
         askControllerRef.current?.abort()
@@ -791,6 +961,17 @@ function App() {
             <span className="privacy-icon" aria-hidden="true">✳</span>
             <span>Your documents stay yours</span>
           </div>
+          <details className="release-notes">
+            <summary>v{releaseVersion} · What's New</summary>
+            <p>v{releaseVersion} — Multilingual Voice Input</p>
+            <ul>
+              <li>🎤 Voice-to-text input using the microphone</li>
+              <li>🌎 Multilingual speech transcription</li>
+              <li>✏️ Review and edit the transcript before sending</li>
+              <li>💬 Same-language answers for supported non-English questions</li>
+              <li>🔒 OpenAI API credentials remain securely on the backend</li>
+            </ul>
+          </details>
         </aside>
 
         <main className="chat-area">
@@ -880,6 +1061,15 @@ function App() {
 
           <div className="composer-wrap">
             {askError && <p className="ask-error" role="alert">{askError}</p>}
+            {voiceError && <p className="voice-error" role="alert">{voiceError}</p>}
+            {['requesting', 'recording', 'uploading'].includes(voicePhase) && (
+              <div className="voice-status" role="status">
+                <span>{voicePhase === 'requesting' ? 'Waiting for microphone permission…'
+                  : voicePhase === 'recording' ? 'Recording… Click the microphone to stop (60-second limit).'
+                    : 'Transcribing…'}</span>
+                <button type="button" onClick={cancelVoice}>Cancel</button>
+              </div>
+            )}
             <form className="composer" onSubmit={handleSubmit}>
               <label className="visually-hidden" htmlFor="question-input">Ask a question</label>
               <textarea
@@ -890,6 +1080,16 @@ function App() {
                 onChange={(event) => setQuestion(event.target.value)}
                 onKeyDown={handleQuestionKeyDown}
               />
+              <button
+                className={`microphone-button${voicePhase === 'recording' ? ' is-recording' : ''}`}
+                type="button"
+                aria-label={voicePhase === 'recording' ? 'Stop recording' : 'Record a question'}
+                aria-pressed={voicePhase === 'recording'}
+                disabled={!activeDocumentId || isAsking || isLoggingOut || voicePhase === 'requesting' || voicePhase === 'uploading'}
+                onClick={() => void handleMicrophone()}
+              >
+                <MicrophoneIcon />
+              </button>
               <button
                 className="send-button"
                 type="submit"

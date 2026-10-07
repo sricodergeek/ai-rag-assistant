@@ -31,7 +31,11 @@ def generate_answer(
             "context; do not invent citations. Use conversation history only "
             "to understand references and follow-up questions. History is not "
             "a source of factual information; all factual answers must be "
-            "grounded in the supplied document context."
+            "grounded in the supplied document context. Answer in the same "
+            "language as the user's current question: Telugu for Telugu, Hindi "
+            "for Hindi, and English for English. Do not translate the question "
+            "into English except if needed for internal reasoning. Preserve "
+            "source labels and the required citation format exactly."
         ),
         input=(
             f"Conversation history:\n{history_text}\n\n"
